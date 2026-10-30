@@ -2,33 +2,43 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const STORAGE_KEY = "myportfolio_comments";
-
-function readComments() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const parsed = saved ? JSON.parse(saved) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
+const API_URL = "http://localhost:3001/api/comments";
 
 function App() {
   const [name, setName] = useState("");
   const [comment, setComment] = useState("");
-  const [comments, setComments] = useState(readComments);
+  const [comments, setComments] = useState([]);
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  async function loadComments() {
+    try {
+      const response = await fetch(API_URL);
+
+      if (!response.ok) {
+        throw new Error("Unable to load comments.");
+      }
+
+      const data = await response.json();
+      setComments(data);
+      setMessage("");
+    } catch (error) {
+      console.error("Loading comments failed:", error);
+      setMessage(
+        "Could not load comments. Please check that the API and MySQL are running."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(comments));
-    } catch {
-      setMessage("Unable to save comments in this browser.");
-    }
-  }, [comments]);
+    loadComments();
+  }, []);
 
-  function handleSubmit(event) {
+  // Send a new comment to the backend to save it in MySQL.
+  async function handleSubmit(event) {
     event.preventDefault();
     setMessage("");
 
@@ -45,26 +55,38 @@ function App() {
       return;
     }
 
-    const newComment = {
-      id: crypto.randomUUID(),
-      name: cleanName,
-      comment: cleanComment,
-      createdAt: new Date().toISOString()
-    };
+    setSaving(true);
 
-    setComments((previous) => [newComment, ...previous].slice(0, 200));
-    setName("");
-    setComment("");
-    setMessage("Your comment was saved in this browser.");
-  }
+    try {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: cleanName,
+          comment: cleanComment,
+        }),
+      });
 
-  function clearComments() {
-    if (!window.confirm("Delete all comments saved in this browser?")) {
-      return;
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to save your comment.");
+      }
+
+      setComments((previous) => [data, ...previous]);
+      setName("");
+      setComment("");
+      setMessage("Your comment was saved in the MySQL database.");
+    } catch (error) {
+      console.error("Saving comment failed:", error);
+      setMessage(
+        error.message || "Could not save your comment. Please try again."
+      );
+    } finally {
+      setSaving(false);
     }
-
-    setComments([]);
-    setMessage("Local comments have been cleared.");
   }
 
   return (
@@ -72,18 +94,18 @@ function App() {
       <header className="site-header">
         <a className="brand" href="#home">MyPortfolio</a>
         <nav aria-label="Main navigation">
-          <a href="#about">About</a>
-          <a href="#skills">Skills</a>
-          <a href="#projects">Projects</a>
+          <a href="#about">About me</a>
+          <a href="#skills"> my Skills</a>
+          <a href="#projects">my Projects</a>
           <a href="#comments">Comments</a>
-          <a href="#contact">Contact</a>
+          <a href="#contact">Contacts</a>
         </nav>
       </header>
 
       <main>
         <section className="hero" id="home">
           <p className="eyebrow">WELCOME TO MY PORTFOLIO</p>
-          <h1>Hello, I’m <span>Samuel.</span></h1>
+          <h1>Hello, my name is NIYITANGA Samuel</h1>
           <p className="hero-text">
             Welcome to my portfolio. Explore my work and leave a comment.
           </p>
@@ -123,7 +145,7 @@ function App() {
         <section className="section comments-section" id="comments">
           <p className="eyebrow">JOIN THE CONVERSATION</p>
           <h2>Leave a Comment</h2>
-          <p>Comments are saved locally in this browser.</p>
+          <p>Comments are saved in the MySQL database.</p>
 
           <form className="comment-form" onSubmit={handleSubmit}>
             <label htmlFor="comment-name">Your name</label>
@@ -150,8 +172,13 @@ function App() {
               placeholder="Write your comment..."
             />
 
-            <p className="character-count">{comment.length}/1000 characters</p>
-            <button type="submit">Save Comment</button>
+            <p className="character-count">
+              {comment.length}/1000 characters
+            </p>
+
+            <button type="submit" disabled={saving}>
+              {saving ? "Saving..." : "Save Comment"}
+            </button>
           </form>
 
           {message && (
@@ -160,19 +187,22 @@ function App() {
 
           <div className="comments-list">
             <div className="comments-heading">
-              <h3>Saved Comments ({comments.length})</h3>
-              {comments.length > 0 && (
-                <button
-                  type="button"
-                  className="refresh-button"
-                  onClick={clearComments}
-                >
-                  Clear All
-                </button>
-              )}
+              <h3>
+                Comments ({comments.length})
+              </h3>
+              <button
+                type="button"
+                className="refresh-button"
+                onClick={loadComments}
+                disabled={loading}
+              >
+                {loading ? "Loading..." : "Refresh"}
+              </button>
             </div>
 
-            {comments.length === 0 ? (
+            {loading ? (
+              <p className="muted">Loading comments from MySQL...</p>
+            ) : comments.length === 0 ? (
               <p className="muted">
                 No comments yet. Be the first to leave one!
               </p>
@@ -181,8 +211,8 @@ function App() {
                 <article className="comment-card" key={item.id}>
                   <div className="comment-meta">
                     <strong>{item.name}</strong>
-                    <time dateTime={item.createdAt}>
-                      {new Date(item.createdAt).toLocaleString()}
+                    <time dateTime={item.created_at}>
+                      {new Date(item.created_at).toLocaleString()}
                     </time>
                   </div>
                   <p className="comment-body">{item.comment}</p>
@@ -195,14 +225,16 @@ function App() {
         <section className="section" id="contact">
           <p className="eyebrow">GET IN TOUCH</p>
           <h2>Contact</h2>
-          <p>Replace this example with your contact information.</p>
-          <a href="mailto:your-email@example.com">Contact me by email</a>
+          <p>MTN:+250 788366495 &amp; AIRTEL:+250 722840249</p>
+          <a href="mailto:niyitangasamuel005.com">
+            Contact me by email
+          </a>
         </section>
       </main>
 
       <footer className="site-footer">
         <p>© {new Date().getFullYear()} MyPortfolio</p>
-        <p>Built with React and Docker.</p>
+        <p>Built with React, Docker, Node.js and MySQL.</p>
       </footer>
     </div>
   );
